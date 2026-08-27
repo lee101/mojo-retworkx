@@ -22,6 +22,7 @@ class _BaseGraph:
         self._nodes: list[object] = []
         self._edges: list[tuple[int, int, object]] = []
         self._topology_cache: dict[bool, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        self._has_self_loop = False
 
     def __len__(self) -> int:
         return len(self._nodes)
@@ -56,6 +57,7 @@ class _BaseGraph:
                     self._topology_cache.clear()
                     return index
         self._edges.append((parent, child, obj))
+        self._has_self_loop |= parent == child
         self._topology_cache.clear()
         return len(self._edges) - 1
 
@@ -186,12 +188,34 @@ def _dijkstra(graph, source, weight_fn, default_weight, undirected=False, goal=N
     graph._check_node(source)
     if goal is not None:
         graph._check_node(goal)
-    offsets, targets, costs = _weighted_csr(graph, weight_fn, default_weight, undirected)
+    offsets, targets, order = _topology_csr(graph, undirected)
     n = len(graph)
     dist = np.empty(n, dtype=np.float64)
     pred = np.empty(n, dtype=np.int64)
-    heap_nodes = np.empty(len(targets) + 2, dtype=np.int64)
-    heap_values = np.empty(len(targets) + 2, dtype=np.float64)
+    heap_capacity = max(n, len(targets)) + 2
+    heap_nodes = np.empty(heap_capacity, dtype=np.int64)
+    heap_values = np.empty(heap_capacity, dtype=np.float64)
+    if weight_fn is not None and len(targets) >= 16_384:
+        costs = np.empty(len(targets), dtype=np.float64)
+        active_count = lib().mrx_reachable_edges(
+            addr(offsets), addr(targets), addr(costs), addr(pred), addr(heap_nodes), n, source,
+        )
+        active = costs[:active_count].astype(np.int64)
+        original = order[active]
+        if undirected or not graph.directed:
+            original = original // 2
+        values = np.fromiter(
+            (float(weight_fn(graph._edges[index][2])) for index in original),
+            dtype=np.float64,
+            count=active_count,
+        )
+        if np.any(values < 0) or np.isnan(values).any():
+            raise ValueError("edge weights must be non-negative and not NaN")
+        costs[active] = values
+    else:
+        _, _, costs = _csr(graph, weight_fn, default_weight, undirected)
+        if np.any(costs < 0) or np.isnan(costs).any():
+            raise ValueError("edge weights must be non-negative and not NaN")
     ok = lib().mrx_dijkstra(addr(offsets), addr(targets), addr(costs), addr(dist), addr(pred), addr(heap_nodes), addr(heap_values), n, source, -1 if goal is None else goal)
     if not ok:
         raise ValueError("invalid source")
@@ -288,6 +312,8 @@ def graph_floyd_warshall_numpy(graph, /, weight_fn=None, default_weight=1.0, par
 
 
 def topological_sort(graph, /):
+    if graph._has_self_loop:
+        raise DAGHasCycle("graph contains a cycle")
     offsets, targets, _ = _topology_csr(graph)
     n = len(graph)
     indegree = np.empty(n, dtype=np.int64)
@@ -300,6 +326,8 @@ def topological_sort(graph, /):
 
 
 def is_directed_acyclic_graph(graph, /) -> bool:
+    if graph._has_self_loop:
+        return False
     try:
         topological_sort(graph)
         return True

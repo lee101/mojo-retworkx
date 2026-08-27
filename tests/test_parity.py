@@ -151,6 +151,18 @@ def test_dijkstra_simd_tail_and_topology_cache_invalidation():
     assert rx.digraph_dijkstra_shortest_path_lengths(graph, 0, weight) == {1: 1.0, 2: 3.0, 4: 6.0}
 
 
+def test_large_sparse_dijkstra_reachability_prepass():
+    ours, theirs = rx.PyDiGraph(), upstream.PyDiGraph()
+    ours.add_nodes_from(range(5000)); theirs.add_nodes_from(range(5000))
+    reachable = [(node, node + 1, 1.0) for node in range(12)]
+    unreachable = [(100 + index % 4900, 100 + (index * 17 + 1) % 4900, 2.0) for index in range(17_000)]
+    ours.add_edges_from(reachable + unreachable)
+    theirs.add_edges_from(reachable + unreachable)
+    actual = rx.digraph_dijkstra_shortest_path_lengths(ours, 0, lambda edge: edge)
+    expected = dict(upstream.digraph_dijkstra_shortest_path_lengths(theirs, 0, lambda edge: edge))
+    assert actual == expected
+
+
 def test_topological_sort_is_valid_and_cycle_detection_matches():
     ours, theirs = make_graph(rx.PyDiGraph), make_graph(upstream.PyDiGraph)
     actual = rx.topological_sort(ours)
@@ -162,6 +174,15 @@ def test_topological_sort_is_valid_and_cycle_detection_matches():
     assert not rx.is_directed_acyclic_graph(ours)
     with pytest.raises(rx.DAGHasCycle):
         rx.topological_sort(ours)
+
+
+def test_self_loop_cycle_fast_path():
+    graph = rx.PyDiGraph()
+    graph.add_nodes_from(range(4))
+    graph.add_edges_from([(0, 1, None), (3, 3, None)])
+    assert not rx.is_directed_acyclic_graph(graph)
+    with pytest.raises(rx.DAGHasCycle):
+        rx.topological_sort(graph)
 
 
 def test_dag_rejects_cycle():

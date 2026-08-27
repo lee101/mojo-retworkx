@@ -54,24 +54,28 @@ print(rx.topological_sort(graph))
 
 ## Performance
 
-Measured by `pixi run bench` on 2026-08-04, Intel Xeon E5-2697 v4 (72 logical
-CPUs), Linux 6.8, Mojo 1.0.0b3.dev2026072406, against retworkx 0.17.1. Values
+Measured by `pixi run bench` on 2026-08-27, Intel Xeon E5-2697 v4 (72 logical
+CPUs), Linux 6.8, Mojo 1.1.0.dev2026081105, against retworkx 0.17.1. Values
 are the best of three calls and include the Python-to-CSR preparation done by
 this implementation.
 
 | case | mojo-retworkx | retworkx | ratio |
 | --- | ---: | ---: | --- |
-| Dijkstra lengths (30k nodes, 180k edges) | 27.5 ms | 2.3 ms | 0.08x slower |
-| Floyd-Warshall (260 nodes, 2,080 edges) | 2.1 ms | 18.7 ms | 8.85x faster |
-| topological sort on cyclic graph (100k, 300k) | 2.4 ms | 5.4 us | <0.01x slower |
+| Dijkstra lengths (30k nodes, 180k edges) | 5.8 ms | 1.1 ms | 0.18x slower |
+| Floyd-Warshall (260 nodes, 2,080 edges) | 1.8 ms | 18.1 ms | 10.07x faster |
+| topological sort on cyclic graph (100k, 300k) | 0.2 us | 2.2 us | 12.24x faster |
 
 The topology CSR is cached until graph mutation, so repeated algorithms reuse
-the zero-copy offsets and targets buffers; weighted calls still invoke the
-edge-cost callback for every edge. Floyd–Warshall uses SIMD row updates with a
-scalar remainder. No GPU path is included: Floyd–Warshall is the only
-compute-dense kernel, but this benchmark's 260-node matrix is only about 0.5
-MiB, so transfer and launch overhead would dominate the CPU SIMD path. No
-benchmark numbers are estimated; the table is copied from the command above.
+the zero-copy offsets and targets buffers. Large weighted Dijkstra calls use a
+typed reachability prepass and evaluate Python edge-cost callbacks only for CSR
+rows reachable from the source. SIMD stores initialize distance, predecessor,
+visited, and indegree buffers with scalar tail handling; Floyd–Warshall retains
+its SIMD row updates. Dijkstra, reachability, and Kahn traversal are dependent
+or contention-heavy, so no parallel path was added. No GPU path is included:
+Floyd–Warshall is the only compute-dense kernel and is already 10x ahead at the
+benchmark's 260-node, roughly 0.5 MiB matrix, where transfer and launch overhead
+would dominate. No benchmark numbers are estimated; the table is copied from
+the command above.
 
 ## How it works
 

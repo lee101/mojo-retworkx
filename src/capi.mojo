@@ -46,6 +46,45 @@ def heap_pop(nodes: IntPtr, values: FloatPtr, size: Int, node_out: IntPtr, value
     values[parent] = last_value
 
 
+@export("mrx_reachable_edges")
+def mrx_reachable_edges(
+    offsets_addr: Int, targets_addr: Int, edge_indices_addr: Int,
+    visited_addr: Int, stack_addr: Int, n: Int, source: Int,
+) abi("C") -> Int:
+    var offsets = ip(offsets_addr)
+    var targets = ip(targets_addr)
+    var edge_indices = fp(edge_indices_addr)
+    var visited = ip(visited_addr)
+    var stack = ip(stack_addr)
+    comptime W = simdwidthof[DType.int]()
+    var i = 0
+    var zeros = SIMD[DType.int, W](0)
+    while i + W <= n:
+        visited.store(i, zeros)
+        i += W
+    while i < n:
+        visited[i] = 0
+        i += 1
+    if source < 0 or source >= n:
+        return 0
+    visited[source] = 1
+    var stack_size = 1
+    stack[0] = source
+    var edge_count = 0
+    while stack_size > 0:
+        stack_size -= 1
+        var u = stack[stack_size]
+        for e in range(offsets[u], offsets[u + 1]):
+            edge_indices[edge_count] = Float64(e)
+            edge_count += 1
+            var v = targets[e]
+            if visited[v] == 0:
+                visited[v] = 1
+                stack[stack_size] = v
+                stack_size += 1
+    return edge_count
+
+
 @export("mrx_dijkstra")
 def mrx_dijkstra(
     offsets_addr: Int, targets_addr: Int, costs_addr: Int,
@@ -63,17 +102,18 @@ def mrx_dijkstra(
     # a valid edge cost and must not be mistaken for an unreachable distance.
     var zero = 0.0
     var inf = 1.0 / zero
-    comptime FW = simdwidthof[DType.float64]()
+    comptime W = simdwidthof[DType.float64]()
     var i = 0
-    var infs = SIMD[DType.float64, FW](inf)
-    while i + FW <= n:
+    var infs = SIMD[DType.float64, W](inf)
+    var no_predecessors = SIMD[DType.int, W](-1)
+    while i + W <= n:
         dist.store(i, infs)
-        i += FW
+        pred.store(i, no_predecessors)
+        i += W
     while i < n:
         dist[i] = inf
-        i += 1
-    for i in range(n):
         pred[i] = -1
+        i += 1
     if source < 0 or source >= n:
         return 0
     dist[source] = 0.0
@@ -151,8 +191,15 @@ def mrx_toposort(
     var indegree = ip(indegree_addr)
     var queue = ip(queue_addr)
     var order = ip(order_addr)
-    for i in range(n):
+    comptime W = simdwidthof[DType.int]()
+    var i = 0
+    var zeros = SIMD[DType.int, W](0)
+    while i + W <= n:
+        indegree.store(i, zeros)
+        i += W
+    while i < n:
         indegree[i] = 0
+        i += 1
     for u in range(n):
         for e in range(offsets[u], offsets[u + 1]):
             indegree[targets[e]] += 1

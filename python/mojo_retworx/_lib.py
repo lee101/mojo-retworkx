@@ -13,6 +13,7 @@ LIB = os.path.join(ROOT, "dist", "libmojo-retworkx.so")
 I = ctypes.c_int64
 
 _SIGNATURES = {
+    "mrx_reachable_edges": ([I] * 7, I),
     "mrx_dijkstra": ([I] * 10, I),
     "mrx_floyd_warshall": ([I] * 5, None),
     "mrx_toposort": ([I] * 6, I),
