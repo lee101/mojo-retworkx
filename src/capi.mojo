@@ -171,8 +171,8 @@ def mrx_floyd_warshall(
             var j = 0
             var through = SIMD[DType.float64, W](through_k)
             while j + W <= n:
-                var candidate = through + matrix.load[width=W](k * n + j)
-                matrix.store(i * n + j, min(matrix.load[width=W](i * n + j), candidate))
+                var candidate = through + matrix.unsafe_load[width=W](k * n + j)
+                matrix.store(i * n + j, min(matrix.unsafe_load[width=W](i * n + j), candidate))
                 j += W
             while j < n:
                 var candidate = through_k + matrix[k * n + j]
